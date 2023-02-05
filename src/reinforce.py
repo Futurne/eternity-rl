@@ -1,20 +1,18 @@
 from itertools import accumulate
 
-import numpy as np
+import gymnasium as gym
 import torch
+import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
+from torch.distributions import Bernoulli
 from torch.nn.utils.clip_grad import clip_grad_norm_
-
-from .environment.gym import EternityEnv
-from .model import CNNPolicy
 
 
 class Reinforce:
     def __init__(
         self,
-        env: EternityEnv,
-        model: CNNPolicy,
+        env: gym.Env,
+        model: nn.Module,
         device: str,
     ):
         self.env = env
@@ -27,17 +25,12 @@ class Reinforce:
         self.episodes_history = []
 
     @staticmethod
-    def select_tile(tile_1: dict[str, torch.Tensor]) -> tuple[np.ndarray, torch.Tensor]:
-        actions = []
-        log_actions = []
-        for action_name in ["tile", "roll"]:
-            logits = tile_1[action_name]
-            distribution = Categorical(logits=logits)
-            action = distribution.sample()
-            actions.append(action.cpu().item())
-            log_actions.append(distribution.log_prob(action))
+    def select_tile(logits: torch.Tensor) -> tuple[int, torch.Tensor]:
+        distribution = Bernoulli(logits=logits)
+        action = distribution.sample()
+        log_action = distribution.log_prob(action)
 
-        return (np.array(actions), torch.concat(log_actions))
+        return action.cpu().long().item(), log_action
 
     def rollout(self):
         """Do a simple episode rollout using the current model's policy.
@@ -46,24 +39,22 @@ class Reinforce:
         """
         env, model, device = self.env, self.model, self.device
 
-        state = env.reset()
+        state, _ = env.reset()
         done = False
 
         rewards, log_actions = [], []
         while not done:
-            state = torch.LongTensor(state).to(device).unsqueeze(0)
-            tile_1, tile_2 = model(state)
-            act_1, log_act_1 = Reinforce.select_tile(tile_1)
-            act_2, log_act_2 = Reinforce.select_tile(tile_2)
+            state = torch.FloatTensor(state).to(device).unsqueeze(0)
+            logits = model(state)
+            action, log_act = Reinforce.select_tile(logits)
+            log_actions.append(log_act)
 
-            action = np.concatenate((act_1, act_2), axis=0)
-            log_actions.append(torch.concat((log_act_1, log_act_2), dim=0))
-
-            state, reward, done, _ = env.step(action)
+            state, reward, terminated, truncated, *_ = env.step(action)
+            done = terminated or truncated
             rewards.append(reward)
 
         rewards = torch.tensor(rewards, device=device)  # Shape of [ep_len,].
-        log_actions = torch.stack(log_actions, dim=0)  # Shape of [ep_len, 4].
+        log_actions = torch.concat(log_actions, dim=0)  # Shape of [ep_len, 1].
 
         # Compute the cumulated returns.
         rewards = torch.flip(rewards, dims=(0,))
