@@ -1,3 +1,4 @@
+import random
 from itertools import accumulate
 
 import gymnasium as gym
@@ -19,18 +20,22 @@ class Reinforce:
         self.model = model
         self.device = device
 
-        self.optimizer = optim.SGD(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
         self.gamma = 0.99
 
         self.episodes_history = []
 
     @staticmethod
     def select_tile(logits: torch.Tensor) -> tuple[int, torch.Tensor]:
-        distribution = Bernoulli(logits=logits)
-        action = distribution.sample()
-        log_action = distribution.log_prob(action)
+        # distribution = Bernoulli(logits=logits)
+        # action = distribution.sample()
+        # log_action = distribution.log_prob(action)
+        prob = torch.sigmoid(logits)
+        action = 1 if random.random() < prob else 0
+        prob = 1 - prob if action == 0 else prob
+        log_action = torch.log(prob + 1e-5)
 
-        return action.cpu().long().item(), log_action
+        return action, log_action
 
     def rollout(self):
         """Do a simple episode rollout using the current model's policy.
