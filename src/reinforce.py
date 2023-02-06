@@ -19,7 +19,7 @@ class Reinforce:
         self.model = model
         self.device = device
 
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-4)
+        self.optimizer = optim.SGD(self.model.parameters(), lr=1e-3)
         self.gamma = 0.99
 
         self.episodes_history = []
@@ -68,9 +68,14 @@ class Reinforce:
         loss = torch.tensor(0.0, device=self.device)
         history_returns = torch.zeros(len(self.episodes_history), device=self.device)
 
+        mean_returns = sum(returns.sum() for _, returns in self.episodes_history)
+        mean_returns = mean_returns / sum(
+            len(returns) for _, returns in self.episodes_history
+        )
+
         for ep_id, (log_actions, returns) in enumerate(self.episodes_history):
             history_returns[ep_id] = returns[0]
-            returns = returns - returns.mean()
+            # returns = returns - mean_returns
             loss += -(log_actions * returns.unsqueeze(1)).mean()
 
         metrics = {
@@ -84,7 +89,7 @@ class Reinforce:
         self.model.to(self.device)
 
         n_batches = 2000
-        n_rollouts = 100
+        n_rollouts = 200
 
         for _ in range(n_batches):
             self.episodes_history = []
